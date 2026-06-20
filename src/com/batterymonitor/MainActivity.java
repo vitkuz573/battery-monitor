@@ -33,7 +33,7 @@ public class MainActivity extends android.app.Activity {
     private Button btnRefresh, btnService;
     private Handler handler = new Handler(Looper.getMainLooper());
     private Runnable autoRefresh;
-    private boolean serviceRunning = false, loading = false;
+    private boolean serviceRunning = false, loading = false, destroyed = false;
     private int currentTab = 0;
     private String currentAppPkg;
     private float density;
@@ -83,7 +83,7 @@ public class MainActivity extends android.app.Activity {
         btnService.setOnClickListener(v -> toggleService());
 
         switchTab(0);
-        autoRefresh = () -> { updateHeader(); if (!loading && currentTab != 6) refreshAll(); handler.postDelayed(autoRefresh, 5000); };
+        autoRefresh = () -> { if (destroyed) return; updateHeader(); if (!loading && currentTab != 6) refreshAll(); handler.postDelayed(autoRefresh, 5000); };
         handler.postDelayed(autoRefresh, 5000);
     }
 
@@ -230,7 +230,7 @@ public class MainActivity extends android.app.Activity {
         long st = parseMem(memInfo, "SwapTotal"), sf = parseMem(memInfo, "SwapFree");
         String[] fl = freqs.split("\n");
 
-        handler.post(() -> {
+        handler.post(() -> { if (destroyed) return;
             contentArea.removeAllViews();
             addCard("Processor", new String[][]{
                 {"Cores", String.valueOf(cores)},
@@ -261,7 +261,7 @@ public class MainActivity extends android.app.Activity {
         String tr = exec("cat /proc/net/dev 2>/dev/null | tail -n+3 | head -10 || echo ''");
         String wifi = exec("dumpsys wifi 2>/dev/null | grep -E 'SSID|rssi|linkSpeed|mWifiInfo'|head -8||echo ''");
         String bg = exec("cmd netpolicy get restrict-background 2>/dev/null||echo 'N/A'");
-        handler.post(() -> { contentArea.removeAllViews();
+        handler.post(() -> { if (destroyed) return; contentArea.removeAllViews();
             if (!ifaces.isEmpty()) addCard("Interfaces", lines(ifaces,10));
             if (!tr.isEmpty()) addCard("Traffic (RX / TX)", lines(tr,10));
             if (!wifi.isEmpty()) addCard("WiFi", lines(wifi,8));
@@ -274,7 +274,7 @@ public class MainActivity extends android.app.Activity {
     private void loadStorage() {
         String df = exec("df -h /data /storage/emulated /sdcard /system 2>/dev/null||df /data 2>/dev/null||echo ''");
         String mounts = exec("mount|grep -E '^/dev|^tmpfs'|awk '{print $1,$3}'|head -20||echo ''");
-        handler.post(() -> { contentArea.removeAllViews();
+        handler.post(() -> { if (destroyed) return; contentArea.removeAllViews();
             if (!df.isEmpty()) addCard("Disk Usage", lines(df,15));
             if (!mounts.isEmpty()) addCard("Mount Points", lines(mounts,15));
             loading = false; });
@@ -292,7 +292,7 @@ public class MainActivity extends android.app.Activity {
         String sensors = exec("dumpsys sensorservice 2>/dev/null|grep -E 'Sensor [0-9]+:'|head -10||echo ''");
         String apps = exec("cmd package list packages -3 2>/dev/null|wc -l||echo '0'");
         String[] pl = props.split("\n");
-        handler.post(() -> { contentArea.removeAllViews();
+        handler.post(() -> { if (destroyed) return; contentArea.removeAllViews();
             addCard("Device", new String[][]{
                 {"Manufacturer", pl.length>0?pl[0]:"N/A"},{"Model",pl.length>1?pl[1]:"N/A"},
                 {"Android",pl.length>2?pl[2]:"N/A"},{"ABI",pl.length>4?pl[4]:"N/A"},
@@ -326,7 +326,7 @@ public class MainActivity extends android.app.Activity {
         String act = exec("dumpsys power 2>/dev/null|grep -A5 'Wake Locks:'|head -20||echo 'N/A'");
         String sus = exec("dumpsys power 2>/dev/null|grep -A20 'Suspend Blockers:'|head -25||echo 'N/A'");
         String doze = exec("dumpsys deviceidle 2>/dev/null|grep -E 'mState|mScreenOn|mCharging'|head -5||echo ''");
-        handler.post(() -> { contentArea.removeAllViews();
+        handler.post(() -> { if (destroyed) return; contentArea.removeAllViews();
             addCard("Kernel Wakelocks", lines(kw,25));
             addCard("Active Wakelocks", lines(act,20));
             addCard("Suspend Blockers", lines(sus,20));
@@ -384,6 +384,7 @@ public class MainActivity extends android.app.Activity {
 
             final String[] finalPkgs = pkgList;
             handler.post(() -> {
+                if (destroyed) return;
                 contentArea.removeAllViews();
                 addInfo("Tap an app to view and toggle its components.");
                 if (finalPkgs.length == 0) { addCard("User Apps", new String[][]{{"None",""}}); loading = false; return; }
@@ -427,7 +428,7 @@ public class MainActivity extends android.app.Activity {
         currentAppPkg = pkg;
         showLoading();
         new Thread(() -> {
-            String raw = exec("dumpsys package " + pkg + " 2>/dev/null || echo ''");
+            String raw = exec("dumpsys package " + pkg + " 2>/dev/null | head -200 || echo ''");
             java.util.HashSet<String> comps = new java.util.HashSet<>();
             java.util.HashSet<String> disabled = new java.util.HashSet<>();
             java.util.regex.Pattern refPat = java.util.regex.Pattern.compile("[a-zA-Z][a-zA-Z0-9._]*/[a-zA-Z0-9._]+");
@@ -445,6 +446,7 @@ public class MainActivity extends android.app.Activity {
             }
 
             handler.post(() -> {
+                if (destroyed) return;
                 contentArea.removeAllViews();
                 addBackButton();
                 addCard("Package", new String[][]{{"Name", pkg}});
@@ -565,13 +567,28 @@ public class MainActivity extends android.app.Activity {
     }
 
     private String exec(String cmd) {
+        Process p = null;
+        BufferedReader r = null;
         try {
-            Process p = Runtime.getRuntime().exec(new String[]{"sh","-c",cmd});
-            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            StringBuilder o = new StringBuilder(); String l;
-            while ((l = r.readLine()) != null) o.append(l).append("\n");
-            p.waitFor(); return o.toString().trim();
-        } catch (Exception e) { return ""; }
+            p = Runtime.getRuntime().exec(new String[]{"sh","-c",cmd});
+            r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            StringBuilder o = new StringBuilder(1024);
+            String l;
+            while ((l = r.readLine()) != null) {
+                if (o.length() > 32768) { o.append("... [truncated]"); break; }
+                o.append(l).append('\n');
+            }
+            BufferedReader er = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+            while (er.readLine() != null);
+            er.close();
+            p.waitFor();
+            return o.toString().trim();
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (r != null) try { r.close(); } catch (Exception ignored) {}
+            if (p != null) p.destroy();
+        }
     }
 
     private String extractModel(String s) {
@@ -738,6 +755,13 @@ public class MainActivity extends android.app.Activity {
             btnService.setText("Stop"); btnService.setBackgroundTintList(ColorStateList.valueOf(0xFFEF5350));
             btnService.setTextColor(0xFFFFFFFF);
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        destroyed = true;
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 
     private static int MP = ViewGroup.LayoutParams.MATCH_PARENT;
