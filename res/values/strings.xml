@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Battery Monitor</string>
+    <string name="tab_battery">Battery</string>
+    <string name="tab_cpu">CPU</string>
+    <string name="tab_network">Network</string>
+    <string name="tab_storage">Storage</string>
+    <string name="tab_system">System</string>
+    <string name="tab_wakelocks">Locks</string>
+    <string name="btn_refresh">Refresh</string>
+    <string name="btn_service">Monitor</string>
+    <string name="start_service">Start monitoring</string>
+    <string name="stop_service">Stop monitoring</string>
+</resources>
