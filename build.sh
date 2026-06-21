@@ -33,10 +33,10 @@ echo "=== Compiling Java sources ==="
 "$JAVAC" -d "$PROJECT_DIR/build/obj" \
     -classpath "$ANDROID_JAR" \
     -source 17 -target 17 \
-    "$PROJECT_DIR/build/obj/com/batterymonitor/R.java" \
-    src/com/batterymonitor/MainActivity.java \
-    src/com/batterymonitor/MonitorService.java \
-    src/com/batterymonitor/SocDatabase.java
+    "$PROJECT_DIR/build/obj/com/vitkuz573/batterymonitor/R.java" \
+    src/com/vitkuz573/batterymonitor/MainActivity.java \
+    src/com/vitkuz573/batterymonitor/MonitorService.java \
+    src/com/vitkuz573/batterymonitor/SocDatabase.java
 
 echo "=== Converting to DEX ==="
 find "$PROJECT_DIR/build/obj" -name "*.class" -exec echo {} \; > "$PROJECT_DIR/build/classes.txt"

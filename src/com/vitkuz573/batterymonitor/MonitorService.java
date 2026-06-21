@@ -1,4 +1,4 @@
-package com.batterymonitor;
+package com.vitkuz573.batterymonitor;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

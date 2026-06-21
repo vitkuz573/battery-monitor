@@ -1,6 +1,7 @@
-package com.batterymonitor;
+package com.vitkuz573.batterymonitor;
 
 import android.content.Context;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -53,12 +54,17 @@ public class SocDatabase {
         executor.execute(() -> {
             if (loadCache(context)) {
                 remoteLoaded = true;
+                Log.i("SOCDB", "Loaded " + lookup.size() + " entries from cache");
                 if (callback != null) callback.run();
                 return;
             }
+            Log.i("SOCDB", "No cache, fetching remote...");
             if (fetchRemote(context)) {
                 remoteLoaded = true;
                 saveCache(context);
+                Log.i("SOCDB", "Remote fetch OK: " + lookup.size() + " entries");
+            } else {
+                Log.w("SOCDB", "Remote fetch FAILED, using fallback (" + lookup.size() + " entries)");
             }
             if (callback != null) callback.run();
         });
@@ -190,6 +196,9 @@ public class SocDatabase {
         conn.setConnectTimeout(10000);
         conn.setReadTimeout(15000);
         conn.setRequestProperty("User-Agent", "BatteryMonitor/1.0");
+        conn.setInstanceFollowRedirects(true);
+        int code = conn.getResponseCode();
+        if (code != 200) throw new Exception("HTTP " + code);
         BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream()));
         StringBuilder sb = new StringBuilder();
         String l;
