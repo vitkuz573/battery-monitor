@@ -44,6 +44,62 @@ public class MainActivity extends android.app.Activity {
     private static final int SURFACE = 0xFF2D2D2D;
 
     private GestureDetector gestureDetector;
+    private SocDatabase socDb;
+    private String findSoc(String raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        SocDatabase.SocInfo info = socDb.findSoc(raw);
+        return info != null ? info.name : null;
+    }
+
+    private String readSysfs(String path) {
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(path));
+            String v = r.readLine();
+            r.close();
+            return v != null ? v.trim() : "";
+        } catch (Exception e) { return ""; }
+    }
+
+    private String refineSoc(String base, String hw) {
+        String lc = hw != null ? hw.toLowerCase(Locale.US) : "";
+        String rev = exec("cat /sys/devices/soc0/revision 2>/dev/null || echo ''").trim();
+        String machine = exec("cat /sys/devices/soc0/machine 2>/dev/null || echo ''").trim().toLowerCase(Locale.US);
+        String socModel = exec("getprop ro.soc.model 2>/dev/null").trim().toLowerCase(Locale.US);
+        String boardPlat = exec("getprop ro.board.platform 2>/dev/null").trim().toLowerCase(Locale.US);
+
+        if (machine.contains("sm8250") || socModel.contains("sm8250") || boardPlat.contains("kona") || lc.contains("kona")) {
+            if (rev.startsWith("2.")) return "Snapdragon 870 (rev " + rev + ")";
+            if (rev.startsWith("1.")) return "Snapdragon 865+ (rev " + rev + ")";
+            if (!rev.isEmpty()) return "Snapdragon 865 (rev " + rev + ")";
+            return "Snapdragon 870";
+        }
+        if (machine.contains("sm8350") || socModel.contains("sm8350") || boardPlat.contains("lahaina") || lc.contains("lahaina")) {
+            if (rev.startsWith("2.")) return "Snapdragon 888+ (rev " + rev + ")";
+            return "Snapdragon 888 (rev " + rev + ")";
+        }
+        if (machine.contains("sm8450") || boardPlat.contains("waipio") || lc.contains("waipio"))
+            return "Snapdragon 8 Gen 1 (rev " + rev + ")";
+        if (machine.contains("sm8475") || boardPlat.contains("waipio") || lc.contains("waipio"))
+            return "Snapdragon 8+ Gen 1 (rev " + rev + ")";
+        if (machine.contains("sm8550") || boardPlat.contains("kalama") || lc.contains("kalama"))
+            return "Snapdragon 8 Gen 2 (rev " + rev + ")";
+        if (machine.contains("sm8650") || boardPlat.contains("pineapple") || lc.contains("pineapple"))
+            return "Snapdragon 8 Gen 3 (rev " + rev + ")";
+        if (machine.contains("sm7250") || boardPlat.contains("lito") || lc.contains("lito"))
+            return "Snapdragon 765/768G (rev " + rev + ")";
+        if (machine.contains("sm7150") || boardPlat.contains("sm7150") || lc.contains("sm7150"))
+            return "Snapdragon 730/732G (rev " + rev + ")";
+        if (machine.contains("shima") || boardPlat.contains("shima") || lc.contains("shima"))
+            return "Snapdragon 780G (rev " + rev + ")";
+        if (machine.contains("yupik") || boardPlat.contains("yupik") || lc.contains("yupik"))
+            return "Snapdragon 778G+ (rev " + rev + ")";
+
+        if (base != null && !base.isEmpty()) {
+            if (rev.isEmpty()) return base;
+            return base + " (rev " + rev + ")";
+        }
+        return null;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,6 +114,9 @@ public class MainActivity extends android.app.Activity {
         tabStrip = findViewById(R.id.tab_bar);
         btnRefresh = findViewById(R.id.btn_refresh);
         btnService = findViewById(R.id.btn_service);
+
+        socDb = new SocDatabase();
+        socDb.loadRemote(this, () -> { if (!destroyed) refreshAll(); });
 
         tabStrip.removeAllViews();
         tabStrip.setPadding(0, 0, 0, 0);
@@ -232,11 +291,23 @@ public class MainActivity extends android.app.Activity {
 
         handler.post(() -> { if (destroyed) return;
             contentArea.removeAllViews();
-            addCard("Processor", new String[][]{
-                {"Cores", String.valueOf(cores)},
-                {"Model", model.isEmpty() ? "N/A" : model},
-                {"Load 1/5/15m", ld},
-            });
+            String vendorName = "";
+            String archName = "";
+            String hwRaw = extractRawHw();
+            if (!hwRaw.isEmpty()) {
+                SocDatabase.SocInfo si = socDb.findSoc(hwRaw);
+                if (si != null) {
+                    if (si.vendor != null && !si.vendor.isEmpty()) vendorName = si.vendor;
+                    if (si.architecture != null && !si.architecture.isEmpty()) archName = si.architecture;
+                }
+            }
+            java.util.ArrayList<String[]> procRows = new java.util.ArrayList<>();
+            procRows.add(new String[]{"Cores", String.valueOf(cores)});
+            procRows.add(new String[]{"Model", model.isEmpty() ? "N/A" : model});
+            if (!vendorName.isEmpty()) procRows.add(new String[]{"Vendor", vendorName});
+            if (!archName.isEmpty()) procRows.add(new String[]{"Architecture", archName});
+            procRows.add(new String[]{"Load 1/5/15m", ld});
+            addCard("Processor", procRows.toArray(new String[0][]));
             addCard("Memory", new String[][]{
                 {"Total", fmt(total*1024)},
                 {"Used", fmt(used*1024) + " (" + mp + "%)"},
@@ -592,8 +663,45 @@ public class MainActivity extends android.app.Activity {
     }
 
     private String extractModel(String s) {
-        for (String l : s.split("\n")) { String[] p = l.split(":"); if(p.length>=2&&(l.contains("Hardware")||l.contains("model name"))) return p[1].trim(); }
-        return "N/A";
+        String rawHw = "";
+        for (String l : s.split("\n")) { String[] p = l.split(":"); if(p.length>=2&&(l.contains("Hardware")||l.contains("model name"))) { rawHw = p[1].trim(); break; } }
+
+        String socInfo = readSysfs("/sys/devices/soc0/machine");
+        if (!socInfo.isEmpty() || !rawHw.isEmpty()) {
+            String match = findSoc(rawHw);
+            if (match == null) match = findSoc(Build.HARDWARE);
+            if (match == null) match = findSoc(Build.BOARD);
+            String refined = refineSoc(match, socInfo.isEmpty() ? rawHw : socInfo);
+            if (refined != null) return refined;
+            if (match != null) return match;
+            String manuf = Build.MANUFACTURER;
+            if (!rawHw.isEmpty()) return manuf + " " + rawHw;
+        }
+
+        String hw = Build.HARDWARE != null ? Build.HARDWARE : "";
+        String board = Build.BOARD != null ? Build.BOARD : "";
+        String match = findSoc(hw);
+        if (match == null) match = findSoc(board);
+        String refined = refineSoc(match, hw);
+        if (refined != null) return refined;
+        if (match != null) return match;
+        return hw.isEmpty() ? "N/A" : hw;
+    }
+
+    private String extractRawHw() {
+        String rawHw = "";
+        String cpuInfo = exec("cat /proc/cpuinfo 2>/dev/null | head -40 || echo ''");
+        for (String l : cpuInfo.split("\n")) {
+            String[] p = l.split(":");
+            if(p.length>=2&&(l.contains("Hardware")||l.contains("model name"))) { rawHw = p[1].trim(); break; }
+        }
+        if (rawHw.isEmpty()) {
+            String socInfo = readSysfs("/sys/devices/soc0/machine");
+            if (!socInfo.isEmpty()) rawHw = socInfo;
+        }
+        if (rawHw.isEmpty()) rawHw = Build.HARDWARE;
+        if (rawHw == null) rawHw = "";
+        return rawHw;
     }
 
     private long parseMem(String s, String key) {

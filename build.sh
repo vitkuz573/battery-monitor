@@ -35,7 +35,8 @@ echo "=== Compiling Java sources ==="
     -source 17 -target 17 \
     "$PROJECT_DIR/build/obj/com/batterymonitor/R.java" \
     src/com/batterymonitor/MainActivity.java \
-    src/com/batterymonitor/MonitorService.java
+    src/com/batterymonitor/MonitorService.java \
+    src/com/batterymonitor/SocDatabase.java
 
 echo "=== Converting to DEX ==="
 find "$PROJECT_DIR/build/obj" -name "*.class" -exec echo {} \; > "$PROJECT_DIR/build/classes.txt"
